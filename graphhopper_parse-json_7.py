@@ -56,6 +56,62 @@ def convert_distance(meters, units):
     return km / 1.60934
  
  
+# ---------------------------------------------------------------------------
+# FEATURE 4: Directions table, trip summary and fuel estimate
+# (branch feature-summary-table)
+# ---------------------------------------------------------------------------
+def shorten(text, width):
+    """Cut long text so the table columns stay aligned."""
+    if len(text) <= width:
+        return text
+    return text[: width - 3] + "..."
+ 
+ 
+def ask_number(prompt):
+    """Ask for a positive number. Pressing Enter skips (returns None)."""
+    while True:
+        answer = input(Color.BOLD + prompt + Color.END).strip()
+        if answer == "":
+            return None
+        try:
+            value = float(answer)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+        warning("Please enter a positive number, or press Enter to skip.")
+ 
+ 
+def print_summary(route_names, vehicle, meters, milliseconds, units, fuel):
+    """Show the trip summary box, including fuel cost for car trips."""
+    distance = convert_distance(meters, units)
+    sec = int(milliseconds / 1000 % 60)
+    min = int(milliseconds / 1000 / 60 % 60)
+    hr = int(milliseconds / 1000 / 60 / 60)
+    heading("TRIP SUMMARY")
+    print(Color.BLUE + "Route:          " + Color.END + route_names)
+    print(Color.BLUE + "Travel mode:    " + Color.END + vehicle)
+    print(Color.BLUE + "Total distance: " + Color.END + "{0:.2f} {1}".format(distance, units))
+    print(Color.BLUE + "Trip duration:  " + Color.END + "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec))
+    if fuel is not None:
+        efficiency, price = fuel
+        fuel_unit = "L" if units == "km" else "gal"
+        fuel_used = distance / efficiency
+        print(Color.BLUE + "Fuel used:      " + Color.END + "{0:.2f} {1}".format(fuel_used, fuel_unit))
+        print(Color.BLUE + "Fuel cost:      " + Color.END + "{0:,.2f}".format(fuel_used * price))
+ 
+ 
+def print_directions(instructions, units):
+    """Show turn-by-turn directions as a numbered table."""
+    heading("TURN-BY-TURN DIRECTIONS")
+    print(Color.BOLD + "{0:>3}  {1:<44}  {2:>9}".format("#", "Instruction", "Distance") + Color.END)
+    print("-" * 60)
+    for number, step in enumerate(instructions, start=1):
+        distance = convert_distance(step["distance"], units)
+        print("{0:>3}  {1:<44}  {2:>6.2f} {3}".format(number, shorten(step["text"], 44), distance, units))
+    print("-" * 60)
+ 
+ 
 def geocoding(location, key):
     while location == "":
         location = input("Enter the location again: ")
@@ -164,22 +220,26 @@ while True:
     paths_data = reply.json()
  
     route_names = " -> ".join(stop[3] for stop in stops)
-    heading("ROUTE BY " + vehicle.upper())
-    info(route_names)
  
     if paths_status == 200:
-        meters = paths_data["paths"][0]["distance"]
-        sec = int(paths_data["paths"][0]["time"] / 1000 % 60)
-        min = int(paths_data["paths"][0]["time"] / 1000 / 60 % 60)
-        hr = int(paths_data["paths"][0]["time"] / 1000 / 60 / 60)
-        print(Color.BLUE + "Distance Traveled: " + Color.END + "{0:.1f} {1}".format(convert_distance(meters, units), units))
-        print(Color.BLUE + "Trip Duration:     " + Color.END + "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec))
-        print("-" * 60)
-        for each in range(len(paths_data["paths"][0]["instructions"])):
-            path = paths_data["paths"][0]["instructions"][each]["text"]
-            distance = paths_data["paths"][0]["instructions"][each]["distance"]
-            print("{0} ( {1:.1f} {2} )".format(path, convert_distance(distance, units), units))
-        print("-" * 60)
+        path = paths_data["paths"][0]
+ 
+        # Fuel estimate only makes sense for car trips
+        fuel = None
+        if vehicle == "car":
+            if units == "km":
+                efficiency = ask_number("Car fuel efficiency in km per liter (Enter to skip): ")
+                price_prompt = "Fuel price per liter (Enter to skip): "
+            else:
+                efficiency = ask_number("Car fuel efficiency in miles per gallon (Enter to skip): ")
+                price_prompt = "Fuel price per gallon (Enter to skip): "
+            if efficiency is not None:
+                price = ask_number(price_prompt)
+                if price is not None:
+                    fuel = (efficiency, price)
+ 
+        print_summary(route_names, vehicle, path["distance"], path["time"], units, fuel)
+        print_directions(path["instructions"], units)
     else:
         error(paths_data["message"])
  
