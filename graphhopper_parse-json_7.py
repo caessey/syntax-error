@@ -125,40 +125,62 @@ while True:
         unit_choice = input(Color.BOLD + "Units? (1) Kilometers  (2) Miles: " + Color.END).strip()
     units = "km" if unit_choice == "1" else "mi"
  
-    loc1 = input(Color.BOLD + "Starting Location: " + Color.END)
-    if loc1 == "quit" or loc1 == "q":
-        break
-    orig = geocoding(loc1, key)
- 
-    loc2 = input(Color.BOLD + "Destination: " + Color.END)
-    if loc2 == "quit" or loc2 == "q":
-        break
-    dest = geocoding(loc2, key)
- 
-    if orig[0] == 200 and dest[0] == 200 and orig[1] != "null" and dest[1] != "null":
-        op = "&point=" + str(orig[1]) + "%2C" + str(orig[2])
-        dp = "&point=" + str(dest[1]) + "%2C" + str(dest[2])
-        paths_url = route_url + urllib.parse.urlencode({"key": key, "vehicle": vehicle}) + op + dp
-        reply = requests.get(paths_url)
-        paths_status = reply.status_code
-        paths_data = reply.json()
- 
-        heading("Directions from " + orig[3] + " to " + dest[3] + " by " + vehicle)
- 
-        if paths_status == 200:
-            meters = paths_data["paths"][0]["distance"]
-            sec = int(paths_data["paths"][0]["time"] / 1000 % 60)
-            min = int(paths_data["paths"][0]["time"] / 1000 / 60 % 60)
-            hr = int(paths_data["paths"][0]["time"] / 1000 / 60 / 60)
-            print(Color.BLUE + "Distance Traveled: " + Color.END + "{0:.1f} {1}".format(convert_distance(meters, units), units))
-            print(Color.BLUE + "Trip Duration:     " + Color.END + "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec))
-            print("-" * 60)
-            for each in range(len(paths_data["paths"][0]["instructions"])):
-                path = paths_data["paths"][0]["instructions"][each]["text"]
-                distance = paths_data["paths"][0]["instructions"][each]["distance"]
-                print("{0} ( {1:.1f} {2} )".format(path, convert_distance(distance, units), units))
-            print("-" * 60)
+    # -----------------------------------------------------------------------
+    # FEATURE 3: Multiple stops (branch feature-multi-stops)
+    # The user enters a start, a destination, then optional extra stops.
+    # GraphHopper's free plan allows up to 5 points per route.
+    # -----------------------------------------------------------------------
+    max_stops = 5
+    stops = []
+    quit_program = False
+    while len(stops) < max_stops:
+        if len(stops) == 0:
+            prompt = "Starting Location: "
+        elif len(stops) == 1:
+            prompt = "Destination: "
         else:
-            error(paths_data["message"])
+            prompt = "Next stop (press Enter to finish, max " + str(max_stops) + " places): "
+        place = input(Color.BOLD + prompt + Color.END).strip()
+        if place == "quit" or place == "q":
+            quit_program = True
+            break
+        if place == "":
+            if len(stops) >= 2:
+                break
+            warning("Please enter a location.")
+            continue
+        result = geocoding(place, key)
+        if result[0] == 200 and result[1] != "null":
+            stops.append(result)
+    if quit_program:
+        break
+ 
+    points = ""
+    for stop in stops:
+        points = points + "&point=" + str(stop[1]) + "%2C" + str(stop[2])
+    paths_url = route_url + urllib.parse.urlencode({"key": key, "vehicle": vehicle}) + points
+    reply = requests.get(paths_url)
+    paths_status = reply.status_code
+    paths_data = reply.json()
+ 
+    route_names = " -> ".join(stop[3] for stop in stops)
+    heading("ROUTE BY " + vehicle.upper())
+    info(route_names)
+ 
+    if paths_status == 200:
+        meters = paths_data["paths"][0]["distance"]
+        sec = int(paths_data["paths"][0]["time"] / 1000 % 60)
+        min = int(paths_data["paths"][0]["time"] / 1000 / 60 % 60)
+        hr = int(paths_data["paths"][0]["time"] / 1000 / 60 / 60)
+        print(Color.BLUE + "Distance Traveled: " + Color.END + "{0:.1f} {1}".format(convert_distance(meters, units), units))
+        print(Color.BLUE + "Trip Duration:     " + Color.END + "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec))
+        print("-" * 60)
+        for each in range(len(paths_data["paths"][0]["instructions"])):
+            path = paths_data["paths"][0]["instructions"][each]["text"]
+            distance = paths_data["paths"][0]["instructions"][each]["distance"]
+            print("{0} ( {1:.1f} {2} )".format(path, convert_distance(distance, units), units))
+        print("-" * 60)
+    else:
+        error(paths_data["message"])
  
 success("\nGoodbye!")
