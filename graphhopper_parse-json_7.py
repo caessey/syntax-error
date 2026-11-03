@@ -7,6 +7,11 @@ route_url = "https://graphhopper.com/api/1/route?"
 key = ""  # Paste your GraphHopper API key here (never upload it to GitHub)
  
  
+# ---------------------------------------------------------------------------
+# FEATURE 1: Colored output (added in branch feature-ui-colors)
+# ANSI color codes make headings, success messages and errors easy to spot.
+# No extra library is needed.
+# ---------------------------------------------------------------------------
 class Color:
     HEADER = "\033[95m"
     BLUE = "\033[94m"
@@ -41,6 +46,14 @@ def error(text):
 def heading(text):
     line = "=" * 60
     print("\n" + Color.HEADER + Color.BOLD + line + "\n" + text.center(60) + "\n" + line + Color.END)
+ 
+ 
+def convert_distance(meters, units):
+    """FEATURE 2: Convert meters to kilometers or miles."""
+    km = meters / 1000
+    if units == "km":
+        return km
+    return km / 1.60934
  
  
 def geocoding(location, key):
@@ -89,16 +102,28 @@ heading("GRAPHHOPPER TRIP PLANNER")
 info("Type q at any prompt to quit.")
  
 while True:
-    heading("VEHICLE PROFILES: car, bike, foot")
-    profile = ["car", "bike", "foot"]
-    vehicle = input(Color.BOLD + "Enter a vehicle profile from the list above: " + Color.END)
-    if vehicle == "quit" or vehicle == "q":
+    # -----------------------------------------------------------------------
+    # FEATURE 2: Travel mode menu and unit choice (branch feature-units-mode)
+    # The user picks a number instead of typing the profile name, and
+    # chooses whether distances are shown in kilometers or miles.
+    # -----------------------------------------------------------------------
+    heading("TRIP SETTINGS")
+    travel_modes = {"1": "car", "2": "bike", "3": "foot"}
+    choice = input(Color.BOLD + "Travel mode? (1) Car  (2) Bike  (3) Foot: " + Color.END).strip()
+    if choice == "quit" or choice == "q":
         break
-    elif vehicle in profile:
-        vehicle = vehicle
-    else:
-        vehicle = "car"
-        warning("No valid vehicle profile was entered. Using the car profile.")
+    while choice not in travel_modes:
+        warning("Please enter 1, 2 or 3.")
+        choice = input(Color.BOLD + "Travel mode? (1) Car  (2) Bike  (3) Foot: " + Color.END).strip()
+    vehicle = travel_modes[choice]
+ 
+    unit_choice = input(Color.BOLD + "Units? (1) Kilometers  (2) Miles: " + Color.END).strip()
+    if unit_choice == "quit" or unit_choice == "q":
+        break
+    while unit_choice not in ("1", "2"):
+        warning("Please enter 1 or 2.")
+        unit_choice = input(Color.BOLD + "Units? (1) Kilometers  (2) Miles: " + Color.END).strip()
+    units = "km" if unit_choice == "1" else "mi"
  
     loc1 = input(Color.BOLD + "Starting Location: " + Color.END)
     if loc1 == "quit" or loc1 == "q":
@@ -121,21 +146,19 @@ while True:
         heading("Directions from " + orig[3] + " to " + dest[3] + " by " + vehicle)
  
         if paths_status == 200:
-            miles = (paths_data["paths"][0]["distance"]) / 1000 / 1.61
-            km = (paths_data["paths"][0]["distance"]) / 1000
+            meters = paths_data["paths"][0]["distance"]
             sec = int(paths_data["paths"][0]["time"] / 1000 % 60)
             min = int(paths_data["paths"][0]["time"] / 1000 / 60 % 60)
             hr = int(paths_data["paths"][0]["time"] / 1000 / 60 / 60)
-            print(Color.BLUE + "Distance Traveled: " + Color.END + "{0:.1f} miles / {1:.1f} km".format(miles, km))
+            print(Color.BLUE + "Distance Traveled: " + Color.END + "{0:.1f} {1}".format(convert_distance(meters, units), units))
             print(Color.BLUE + "Trip Duration:     " + Color.END + "{0:02d}:{1:02d}:{2:02d}".format(hr, min, sec))
             print("-" * 60)
             for each in range(len(paths_data["paths"][0]["instructions"])):
                 path = paths_data["paths"][0]["instructions"][each]["text"]
                 distance = paths_data["paths"][0]["instructions"][each]["distance"]
-                print("{0} ( {1:.1f} km / {2:.1f} miles )".format(path, distance / 1000, distance / 1000 / 1.61))
+                print("{0} ( {1:.1f} {2} )".format(path, convert_distance(distance, units), units))
             print("-" * 60)
         else:
             error(paths_data["message"])
  
 success("\nGoodbye!")
- 
