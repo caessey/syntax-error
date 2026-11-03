@@ -1,10 +1,13 @@
+import csv
 import os
+from datetime import datetime
+ 
 import requests
 import urllib.parse
  
 geocode_url = "https://graphhopper.com/api/1/geocode?"
 route_url = "https://graphhopper.com/api/1/route?"
-key = ""  # Paste your GraphHopper API key here (never upload it to GitHub)
+REQUEST_TIMEOUT = 10  # seconds to wait for GraphHopper before giving up
  
  
 # ---------------------------------------------------------------------------
@@ -112,13 +115,86 @@ def print_directions(instructions, units):
     print("-" * 60)
  
  
+# ---------------------------------------------------------------------------
+# FEATURE 5: Error handling, safe API key and export
+# (branch feature-export-errors)
+# ---------------------------------------------------------------------------
+def get_api_key():
+    """Read the key from the GRAPHHOPPER_API_KEY environment variable,
+    or ask the user. The key is never stored in the code or on GitHub."""
+    key = os.environ.get("GRAPHHOPPER_API_KEY", "").strip()
+    if key:
+        info("Using API key from the GRAPHHOPPER_API_KEY environment variable.")
+        return key
+    while key == "":
+        key = input(Color.BOLD + "Enter your GraphHopper API key: " + Color.END).strip()
+    return key
+ 
+ 
+def call_api(url):
+    """Send a GET request. Returns (status, data), or (None, None) if the
+    request failed, after printing a clear error message."""
+    try:
+        reply = requests.get(url, timeout=REQUEST_TIMEOUT)
+    except requests.exceptions.ConnectionError:
+        error("Cannot reach GraphHopper. Check your internet connection.")
+        return None, None
+    except requests.exceptions.Timeout:
+        error("GraphHopper took too long to answer. Please try again.")
+        return None, None
+    try:
+        data = reply.json()
+    except ValueError:
+        error("Unexpected response from GraphHopper (status " + str(reply.status_code) + ").")
+        return None, None
+    if reply.status_code == 401:
+        error("Invalid API key. Check the key in your GraphHopper dashboard.")
+    elif reply.status_code == 429:
+        error("API limit reached. Wait a moment or check your daily credits.")
+    return reply.status_code, data
+ 
+ 
+def export_trip(route_names, vehicle, path, units):
+    """Save the trip to a .txt or .csv file in the current folder."""
+    choice = input(Color.BOLD + "Save this trip? (1) .txt  (2) .csv  (Enter) No: " + Color.END).strip()
+    if choice not in ("1", "2"):
+        return
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    distance = "{0:.2f} {1}".format(convert_distance(path["distance"], units), units)
+    try:
+        if choice == "1":
+            filename = "trip_" + stamp + ".txt"
+            with open(filename, "w", encoding="utf-8") as file:
+                file.write("Route: " + route_names + "\n")
+                file.write("Travel mode: " + vehicle + "\n")
+                file.write("Total distance: " + distance + "\n\nDIRECTIONS\n")
+                for number, step in enumerate(path["instructions"], start=1):
+                    step_distance = convert_distance(step["distance"], units)
+                    file.write("{0}. {1} ({2:.2f} {3})\n".format(number, step["text"], step_distance, units))
+        else:
+            filename = "trip_" + stamp + ".csv"
+            with open(filename, "w", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerow(["Route", route_names])
+                writer.writerow(["Travel mode", vehicle])
+                writer.writerow(["Total distance", distance])
+                writer.writerow([])
+                writer.writerow(["Step", "Instruction", "Distance (" + units + ")"])
+                for number, step in enumerate(path["instructions"], start=1):
+                    step_distance = convert_distance(step["distance"], units)
+                    writer.writerow([number, step["text"], "{0:.2f}".format(step_distance)])
+        success("Trip saved to " + filename)
+    except OSError as exc:
+        error("Could not save the file: " + str(exc))
+ 
+ 
 def geocoding(location, key):
     while location == "":
         location = input("Enter the location again: ")
     url = geocode_url + urllib.parse.urlencode({"q": location, "limit": "1", "key": key})
-    replydata = requests.get(url)
-    json_data = replydata.json()
-    json_status = replydata.status_code
+    json_status, json_data = call_api(url)
+    if json_status is None:
+        return None, "null", "null", location
  
     if json_status == 200 and len(json_data["hits"]) != 0:
         lat = json_data["hits"][0]["point"]["lat"]
@@ -147,15 +223,16 @@ def geocoding(location, key):
         lat = "null"
         lng = "null"
         new_loc = location
-        if json_status != 200:
-            error("Geocode API status " + str(json_status) + ": " + json_data["message"])
-        else:
+        if json_status == 200:
             error('Could not find "' + location + '".')
+        elif json_status not in (401, 429):
+            error("Geocode API status " + str(json_status) + ": " + json_data.get("message", ""))
     return json_status, lat, lng, new_loc
  
  
 heading("GRAPHHOPPER TRIP PLANNER")
 info("Type q at any prompt to quit.")
+key = get_api_key()
  
 while True:
     # -----------------------------------------------------------------------
@@ -215,9 +292,9 @@ while True:
     for stop in stops:
         points = points + "&point=" + str(stop[1]) + "%2C" + str(stop[2])
     paths_url = route_url + urllib.parse.urlencode({"key": key, "vehicle": vehicle}) + points
-    reply = requests.get(paths_url)
-    paths_status = reply.status_code
-    paths_data = reply.json()
+    paths_status, paths_data = call_api(paths_url)
+    if paths_status is None:
+        continue
  
     route_names = " -> ".join(stop[3] for stop in stops)
  
@@ -240,7 +317,8 @@ while True:
  
         print_summary(route_names, vehicle, path["distance"], path["time"], units, fuel)
         print_directions(path["instructions"], units)
-    else:
-        error(paths_data["message"])
+        export_trip(route_names, vehicle, path, units)
+    elif paths_status not in (401, 429):
+        error(paths_data.get("message", "No route found."))
  
 success("\nGoodbye!")
